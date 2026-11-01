@@ -888,7 +888,8 @@ fn credential_denies_respect_explicit_user_rules_and_unsandboxed_profiles() {
     let auth_path = codex_home_path.join("auth.json");
     std::fs::write(auth_path.as_path(), "{}").expect("write auth.json");
 
-    let disabled = super::protect_codex_credentials_in(PermissionProfile::Disabled, &codex_home_path);
+    let disabled =
+        super::protect_codex_credentials_in(PermissionProfile::Disabled, &codex_home_path);
     assert_eq!(disabled, PermissionProfile::Disabled);
 
     let explicit = PermissionProfile::from_runtime_permissions(
@@ -903,8 +904,8 @@ fn credential_denies_respect_explicit_user_rules_and_unsandboxed_profiles() {
         ]),
         NetworkSandboxPolicy::Restricted,
     );
-    let (after, _) = super::protect_codex_credentials_in(explicit, &codex_home_path)
-        .to_runtime_permissions();
+    let (after, _) =
+        super::protect_codex_credentials_in(explicit, &codex_home_path).to_runtime_permissions();
     assert!(
         !after
             .get_unreadable_roots_with_cwd(codex_home_path.as_path())

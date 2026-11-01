@@ -173,7 +173,9 @@ fn test_runtime_paths() -> ExecServerRuntimeOptions {
 
 #[test]
 fn unauthenticated_non_loopback_websocket_listener_is_refused() {
-    let bind_address = "0.0.0.0:0".parse::<SocketAddr>().expect("valid socket address");
+    let bind_address = "0.0.0.0:0"
+        .parse::<SocketAddr>()
+        .expect("valid socket address");
     let err = super::ensure_listener_auth_allowed(
         bind_address,
         &codex_websocket_auth::WebsocketAuthPolicy::default(),
@@ -189,7 +191,9 @@ fn unauthenticated_non_loopback_websocket_listener_is_refused() {
 
 #[test]
 fn unauthenticated_loopback_websocket_listener_is_allowed() {
-    let bind_address = "127.0.0.1:0".parse::<SocketAddr>().expect("valid socket address");
+    let bind_address = "127.0.0.1:0"
+        .parse::<SocketAddr>()
+        .expect("valid socket address");
     super::ensure_listener_auth_allowed(
         bind_address,
         &codex_websocket_auth::WebsocketAuthPolicy::default(),

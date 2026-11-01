@@ -859,8 +859,7 @@ pub(crate) fn protect_codex_credentials_in(
         .iter()
         .map(|name| codex_home.join(name))
         .collect();
-    let protected =
-        file_system_policy.with_default_credential_read_denies(&credential_paths);
+    let protected = file_system_policy.with_default_credential_read_denies(&credential_paths);
     PermissionProfile::from_runtime_permissions_with_enforcement(
         profile.enforcement(),
         &protected,

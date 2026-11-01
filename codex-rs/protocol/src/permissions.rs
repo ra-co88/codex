@@ -881,7 +881,10 @@ impl FileSystemSandboxPolicy {
     /// Paths that already have an explicit rule are left untouched, so a user
     /// can still opt a path back in by configuring it explicitly. Missing
     /// paths are skipped rather than failing sandbox setup.
-    pub fn with_default_credential_read_denies(mut self, credential_paths: &[AbsolutePathBuf]) -> Self {
+    pub fn with_default_credential_read_denies(
+        mut self,
+        credential_paths: &[AbsolutePathBuf],
+    ) -> Self {
         if self.kind != FileSystemSandboxKind::Restricted {
             return self;
         }

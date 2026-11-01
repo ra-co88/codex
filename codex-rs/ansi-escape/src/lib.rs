@@ -69,7 +69,6 @@ pub fn ansi_escape(s: &str) -> Text<'static> {
     }
 }
 
-
 /// Removes control characters (including ESC) while keeping line breaks.
 fn strip_control_chars(s: &str) -> String {
     s.chars()
