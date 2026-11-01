@@ -1483,3 +1483,41 @@ def test_sdk_release_matches_runtime(
         ],
     }
     assert (script.sdk_root() / "pyproject.toml").read_text() == source_pyproject
+
+
+def test_runtime_archive_digest_mismatch_is_rejected(tmp_path, monkeypatch) -> None:
+    runtime_setup = _load_runtime_setup_module()
+    archive = tmp_path / "codex-x86_64-unknown-linux-musl.tar.gz"
+    archive.write_bytes(b"tampered")
+    monkeypatch.setattr(
+        runtime_setup,
+        "_release_metadata",
+        lambda version: {
+            "assets": [{"name": archive.name, "digest": "sha256:" + "0" * 64}]
+        },
+    )
+    with pytest.raises(runtime_setup.RuntimeSetupError, match="SHA-256 mismatch"):
+        runtime_setup._verify_release_archive_digest("1.2.3", archive)
+    assert not archive.exists()
+
+
+def test_runtime_archive_digest_match_and_missing_digest(tmp_path, monkeypatch) -> None:
+    import hashlib
+
+    runtime_setup = _load_runtime_setup_module()
+    archive = tmp_path / "codex-x86_64-unknown-linux-musl.tar.gz"
+    archive.write_bytes(b"genuine")
+    good = hashlib.sha256(b"genuine").hexdigest()
+    monkeypatch.setattr(
+        runtime_setup,
+        "_release_metadata",
+        lambda version: {"assets": [{"name": archive.name, "digest": f"sha256:{good}"}]},
+    )
+    runtime_setup._verify_release_archive_digest("1.2.3", archive)
+    assert archive.exists()
+
+    monkeypatch.setattr(
+        runtime_setup, "_release_metadata", lambda version: {"assets": [{"name": archive.name}]}
+    )
+    with pytest.raises(runtime_setup.RuntimeSetupError, match="no SHA-256 digest"):
+        runtime_setup._verify_release_archive_digest("1.2.3", archive)

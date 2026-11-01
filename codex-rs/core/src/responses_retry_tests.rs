@@ -98,3 +98,19 @@ async fn stream_retry_preserves_deadline_across_delayed_notification() {
         "retry resumed at {resumed_at:?}, expected {advice:?}"
     );
 }
+
+#[test]
+fn connection_retry_budget_is_bounded() {
+    let started_at = Instant::now();
+    assert!(!super::connection_retry_budget_exhausted(
+        started_at, started_at
+    ));
+    assert!(!super::connection_retry_budget_exhausted(
+        started_at,
+        started_at + super::MAX_CONNECTION_RETRY_DURATION - Duration::from_secs(1)
+    ));
+    assert!(super::connection_retry_budget_exhausted(
+        started_at,
+        started_at + super::MAX_CONNECTION_RETRY_DURATION
+    ));
+}

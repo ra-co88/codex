@@ -74,3 +74,11 @@ fn multiline_warning_contains_counts_and_preserves_the_styled_first_line() {
         expected_events
     );
 }
+
+#[test]
+fn parse_failure_fallback_strips_control_characters() {
+    assert_eq!(
+        super::strip_control_chars("a\u{1b}[31mb\n\u{7}c\u{9b}d"),
+        "a[31mb\ncd".to_string()
+    );
+}

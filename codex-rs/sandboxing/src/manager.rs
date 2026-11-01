@@ -373,8 +373,9 @@ impl SandboxManager {
         let additional_permissions = command.additional_permissions.take();
         let managed_mitm_ca_trust_bundle_path =
             network.and_then(NetworkProxy::managed_mitm_ca_trust_bundle_path);
-        let base_effective_permission_profile =
-            effective_permission_profile(permissions, additional_permissions.as_ref());
+        let base_effective_permission_profile = protect_codex_credentials(
+            effective_permission_profile(permissions, additional_permissions.as_ref()),
+        );
         let pending_sandboxed_request = PendingSandboxedExecRequest::new(
             &command.cwd,
             sandbox_policy_cwd,
@@ -826,6 +827,45 @@ fn linux_sandbox_arg0_override(exe: &Path) -> String {
     } else {
         CODEX_LINUX_SANDBOX_ARG0.to_string()
     }
+}
+
+/// Credential files under `$CODEX_HOME` that sandboxed commands must never read.
+const CODEX_HOME_CREDENTIAL_FILES: &[&str] = &["auth.json", ".credentials.json"];
+
+/// Applies deny-read entries for Codex's own credential files to a restricted
+/// filesystem policy. `workspace-write` and `read-only` grant read access to
+/// the whole filesystem, which otherwise includes `$CODEX_HOME/auth.json`.
+fn protect_codex_credentials(profile: PermissionProfile) -> PermissionProfile {
+    let Ok(codex_home) = codex_utils_home_dir::find_codex_home() else {
+        return profile;
+    };
+    protect_codex_credentials_in(profile, &codex_home)
+}
+
+pub(crate) fn protect_codex_credentials_in(
+    profile: PermissionProfile,
+    codex_home: &AbsolutePathBuf,
+) -> PermissionProfile {
+    let (file_system_policy, network_policy) = profile.to_runtime_permissions();
+    // Only harden profiles that are actually confined. A restricted profile with
+    // full-disk write is already outside the sandbox's protection model, and
+    // adding denies there would change which backend is selected.
+    if file_system_policy.kind != codex_protocol::permissions::FileSystemSandboxKind::Restricted
+        || file_system_policy.has_full_disk_write_access()
+    {
+        return profile;
+    }
+    let credential_paths: Vec<AbsolutePathBuf> = CODEX_HOME_CREDENTIAL_FILES
+        .iter()
+        .map(|name| codex_home.join(name))
+        .collect();
+    let protected =
+        file_system_policy.with_default_credential_read_denies(&credential_paths);
+    PermissionProfile::from_runtime_permissions_with_enforcement(
+        profile.enforcement(),
+        &protected,
+        network_policy,
+    )
 }
 
 #[cfg(test)]

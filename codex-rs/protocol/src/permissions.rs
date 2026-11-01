@@ -873,6 +873,33 @@ impl FileSystemSandboxPolicy {
         FileSystemSandboxPolicy::restricted(entries)
     }
 
+    /// Adds deny-read entries for Codex credential files (for example
+    /// `$CODEX_HOME/auth.json`) to a restricted policy, so sandboxed commands
+    /// cannot read the user's bearer credentials through the broad root read
+    /// grant used by `workspace-write` and `read-only`.
+    ///
+    /// Paths that already have an explicit rule are left untouched, so a user
+    /// can still opt a path back in by configuring it explicitly. Missing
+    /// paths are skipped rather than failing sandbox setup.
+    pub fn with_default_credential_read_denies(mut self, credential_paths: &[AbsolutePathBuf]) -> Self {
+        if self.kind != FileSystemSandboxKind::Restricted {
+            return self;
+        }
+        for path in credential_paths {
+            let path: FileSystemPath = path.clone().into();
+            if self.entries.iter().any(|entry| {
+                file_system_paths_share_target(&entry.path, &path, PathConvention::native())
+            }) {
+                continue;
+            }
+            self.entries.push(FileSystemSandboxEntry::skip_missing_path(
+                path,
+                FileSystemAccessMode::Deny,
+            ));
+        }
+        self
+    }
+
     /// Converts a legacy sandbox policy into an equivalent filesystem policy
     /// after resolving cwd-sensitive legacy defaults for the provided cwd.
     ///

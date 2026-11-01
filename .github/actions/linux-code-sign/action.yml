@@ -14,8 +14,10 @@ inputs:
 runs:
   using: composite
   steps:
-    # The installer verifies the signer with an older Cosign. Give it Sigstore's
-    # trusted root so it can verify both release signatures offline.
+    # Produce keyless Sigstore bundles (<binary>.sigstore) that are shipped with
+    # each Linux release. NOTE: no installer in this repository verifies these
+    # bundles today; install.sh/install.ps1 check SHA-256 digests only. Check out
+    # Sigstore's trusted root so signing can run with a pinned, offline root.
     - name: Check out the Sigstore trust root
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:

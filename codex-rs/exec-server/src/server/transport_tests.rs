@@ -170,3 +170,29 @@ fn test_runtime_paths() -> ExecServerRuntimeOptions {
     )
     .expect("runtime paths")
 }
+
+#[test]
+fn unauthenticated_non_loopback_websocket_listener_is_refused() {
+    let bind_address = "0.0.0.0:0".parse::<SocketAddr>().expect("valid socket address");
+    let err = super::ensure_listener_auth_allowed(
+        bind_address,
+        &codex_websocket_auth::WebsocketAuthPolicy::default(),
+    )
+    .expect_err("non-loopback listener without auth must be refused");
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(
+        err.to_string()
+            .contains("refusing to start non-loopback websocket listener"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn unauthenticated_loopback_websocket_listener_is_allowed() {
+    let bind_address = "127.0.0.1:0".parse::<SocketAddr>().expect("valid socket address");
+    super::ensure_listener_auth_allowed(
+        bind_address,
+        &codex_websocket_auth::WebsocketAuthPolicy::default(),
+    )
+    .expect("loopback listener without auth keeps working");
+}

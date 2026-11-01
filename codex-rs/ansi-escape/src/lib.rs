@@ -46,19 +46,35 @@ pub fn ansi_escape(s: &str) -> Text<'static> {
     // such that it's not worth it.
     match s.into_text() {
         Ok(text) => text,
-        Err(err) => match err {
-            Error::NomError(message) => {
-                tracing::error!(
-                    "ansi_to_tui NomError docs claim should never happen when parsing `{s}`: {message}"
-                );
-                panic!();
+        Err(err) => {
+            // A display helper must never abort the process. Fall back to the
+            // input with control characters removed, so unparsed escape
+            // sequences cannot reach the terminal raw.
+            match err {
+                Error::NomError(message) => {
+                    tracing::warn!(
+                        input_bytes = s.len(),
+                        "ansi_to_tui failed to parse output; rendering as plain text: {message}"
+                    );
+                }
+                Error::Utf8Error(utf8error) => {
+                    tracing::warn!(
+                        input_bytes = s.len(),
+                        "ansi_to_tui hit invalid UTF-8; rendering as plain text: {utf8error}"
+                    );
+                }
             }
-            Error::Utf8Error(utf8error) => {
-                tracing::error!("Utf8Error: {utf8error}");
-                panic!();
-            }
-        },
+            Text::raw(strip_control_chars(s))
+        }
     }
+}
+
+
+/// Removes control characters (including ESC) while keeping line breaks.
+fn strip_control_chars(s: &str) -> String {
+    s.chars()
+        .filter(|c| *c == '\n' || !c.is_control())
+        .collect()
 }
 
 #[cfg(test)]

@@ -22,6 +22,11 @@ use tracing::warn;
 
 const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
+/// Overall budget for the "waiting for network" retry loop. Once a sampling
+/// request has been failing to connect for this long, it falls through to the
+/// ordinary bounded retry policy and the turn ends with an error instead of
+/// spinning forever on a permanently lost network.
+const MAX_CONNECTION_RETRY_DURATION: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ResponsesStreamRequest {
@@ -33,6 +38,7 @@ pub(crate) struct ResponsesStreamRetryState {
     retries: u64,
     connection_retries: u64,
     connection_retry_delay: Duration,
+    connection_retry_started_at: Option<Instant>,
 }
 
 impl Default for ResponsesStreamRetryState {
@@ -41,6 +47,7 @@ impl Default for ResponsesStreamRetryState {
             retries: 0,
             connection_retries: 0,
             connection_retry_delay: INITIAL_CONNECTION_RETRY_DELAY,
+            connection_retry_started_at: None,
         }
     }
 }
@@ -50,6 +57,12 @@ impl Default for ResponsesStreamRetryState {
 pub(crate) struct ExhaustedResponseRetry {
     pub(crate) turn_id: String,
     pub(crate) retry_at: Option<tokio::time::Instant>,
+}
+
+/// Returns true once connection failures have persisted past the overall
+/// connection-retry budget.
+fn connection_retry_budget_exhausted(started_at: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(started_at) >= MAX_CONNECTION_RETRY_DURATION
 }
 
 /// Returns `Ok(())` when the caller should retry the request loop, or the original error when
@@ -99,6 +112,12 @@ pub(crate) async fn handle_response_stream_error(
         && matches!(err.details(), CodexErrorDetails::ConnectionFailed(_))
         && !turn_context.session_source.is_internal()
         && !turn_context.provider.info().is_amazon_bedrock()
+        && !connection_retry_budget_exhausted(
+            *retry_state
+                .connection_retry_started_at
+                .get_or_insert_with(Instant::now),
+            Instant::now(),
+        )
     {
         let retry_delay = retry_state.connection_retry_delay;
         warn!(

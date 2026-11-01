@@ -20,6 +20,7 @@ use codex_http_client::HttpClientFactory;
 use codex_websocket_auth::WebsocketAuthPolicy;
 use codex_websocket_auth::WebsocketAuthSettings;
 use codex_websocket_auth::authorize_upgrade;
+use codex_websocket_auth::is_unauthenticated_non_loopback_listener;
 use codex_websocket_auth::policy_from_settings;
 use std::io::Write as _;
 use std::net::SocketAddr;
@@ -175,6 +176,24 @@ where
     Ok(())
 }
 
+/// Each listener decides whether its auth policy is acceptable for its bind
+/// address (see `codex_websocket_auth`). Like app-server, exec-server refuses to
+/// expose an unauthenticated WebSocket listener on a non-loopback address.
+fn ensure_listener_auth_allowed(
+    bind_address: SocketAddr,
+    auth_policy: &WebsocketAuthPolicy,
+) -> io::Result<()> {
+    if is_unauthenticated_non_loopback_listener(bind_address, auth_policy) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "refusing to start non-loopback websocket listener {bind_address} without auth; configure `--ws-auth capability-token` or `--ws-auth signed-bearer-token`"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 async fn run_websocket_listener(
     bind_address: SocketAddr,
     runtime_paths: ExecServerRuntimeOptions,
@@ -183,6 +202,7 @@ async fn run_websocket_listener(
     request_dispatch_mode: RequestDispatchMode,
     auth_policy: WebsocketAuthPolicy,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ensure_listener_auth_allowed(bind_address, &auth_policy)?;
     let listener = TcpListener::bind(bind_address).await?;
     let local_addr = listener.local_addr()?;
     let processor = ConnectionProcessor::new_with_telemetry(

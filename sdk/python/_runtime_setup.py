@@ -1,3 +1,4 @@
+import hashlib
 import importlib
 import importlib.metadata
 import importlib.util
@@ -70,6 +71,7 @@ def ensure_runtime_package_installed(
     with tempfile.TemporaryDirectory(prefix="codex-python-runtime-") as temp_root_str:
         temp_root = Path(temp_root_str)
         archive_path = _download_release_archive(requested_version, temp_root)
+        _verify_release_archive_digest(requested_version, archive_path)
         staged_runtime_dir = _stage_runtime_package(
             sdk_python_dir,
             requested_version,
@@ -258,6 +260,48 @@ def _download_release_archive(version: str, temp_root: Path) -> Path:
             f"STDOUT:\n{exc.stdout}\nSTDERR:\n{exc.stderr}"
         ) from exc
     return archive_path
+
+
+def _expected_asset_sha256(version: str, asset_name: str) -> str:
+    """Return the SHA-256 GitHub records for a release asset.
+
+    GitHub computes asset digests server-side at upload time and exposes them
+    in release metadata as ``digest: "sha256:<hex>"``.
+    """
+    metadata = _release_metadata(version)
+    assets = metadata.get("assets")
+    if isinstance(assets, list):
+        for item in assets:
+            if not isinstance(item, dict) or item.get("name") != asset_name:
+                continue
+            digest = item.get("digest")
+            if isinstance(digest, str) and digest.startswith("sha256:"):
+                expected = digest.removeprefix("sha256:").strip().lower()
+                if re.fullmatch(r"[0-9a-f]{64}", expected):
+                    return expected
+    raise RuntimeSetupError(
+        f"Release {_release_tag(version)} has no SHA-256 digest for {asset_name}; "
+        "refusing to install an unverified runtime archive."
+    )
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_release_archive_digest(version: str, archive_path: Path) -> None:
+    expected = _expected_asset_sha256(version, archive_path.name)
+    actual = _file_sha256(archive_path)
+    if actual != expected:
+        archive_path.unlink(missing_ok=True)
+        raise RuntimeSetupError(
+            f"SHA-256 mismatch for {archive_path.name}: expected {expected}, got {actual}. "
+            "The downloaded archive was deleted."
+        )
 
 
 def _stage_runtime_package(

@@ -838,3 +838,77 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
     );
     assert!(materialized_helper.exists());
 }
+
+#[test]
+fn workspace_write_denies_reading_codex_home_credentials() {
+    let codex_home = TempDir::new().expect("codex home");
+    let workspace = TempDir::new().expect("workspace");
+    let codex_home_path =
+        AbsolutePathBuf::from_absolute_path(canonicalize(codex_home.path()).expect("canonical"))
+            .expect("absolute codex home");
+    let auth_path = codex_home_path.join("auth.json");
+    std::fs::write(auth_path.as_path(), "{}").expect("write auth.json");
+    let workspace_path =
+        AbsolutePathBuf::from_absolute_path(canonicalize(workspace.path()).expect("canonical"))
+            .expect("absolute workspace");
+
+    let profile = PermissionProfile::from_runtime_permissions(
+        &FileSystemSandboxPolicy::workspace_write(
+            std::slice::from_ref(&workspace_path),
+            /*exclude_tmpdir_env_var*/ true,
+            /*exclude_slash_tmp*/ true,
+        ),
+        NetworkSandboxPolicy::Restricted,
+    );
+    let (before, _) = profile.to_runtime_permissions();
+    assert!(
+        !before
+            .get_unreadable_roots_with_cwd(workspace_path.as_path())
+            .contains(&auth_path),
+        "precondition: workspace-write leaves auth.json readable"
+    );
+
+    let protected = super::protect_codex_credentials_in(profile, &codex_home_path);
+    let (after, _) = protected.to_runtime_permissions();
+    assert!(
+        after
+            .get_unreadable_roots_with_cwd(workspace_path.as_path())
+            .contains(&auth_path),
+        "auth.json must be unreadable inside the sandbox"
+    );
+    assert!(!after.has_full_disk_read_access_for_convention(None));
+}
+
+#[test]
+fn credential_denies_respect_explicit_user_rules_and_unsandboxed_profiles() {
+    let codex_home = TempDir::new().expect("codex home");
+    let codex_home_path =
+        AbsolutePathBuf::from_absolute_path(canonicalize(codex_home.path()).expect("canonical"))
+            .expect("absolute codex home");
+    let auth_path = codex_home_path.join("auth.json");
+    std::fs::write(auth_path.as_path(), "{}").expect("write auth.json");
+
+    let disabled = super::protect_codex_credentials_in(PermissionProfile::Disabled, &codex_home_path);
+    assert_eq!(disabled, PermissionProfile::Disabled);
+
+    let explicit = PermissionProfile::from_runtime_permissions(
+        &FileSystemSandboxPolicy::restricted(vec![
+            FileSystemSandboxEntry::new(
+                FileSystemPath::Special {
+                    value: FileSystemSpecialPath::Root,
+                },
+                FileSystemAccessMode::Read,
+            ),
+            FileSystemSandboxEntry::new(auth_path.clone().into(), FileSystemAccessMode::Read),
+        ]),
+        NetworkSandboxPolicy::Restricted,
+    );
+    let (after, _) = super::protect_codex_credentials_in(explicit, &codex_home_path)
+        .to_runtime_permissions();
+    assert!(
+        !after
+            .get_unreadable_roots_with_cwd(codex_home_path.as_path())
+            .contains(&auth_path),
+        "an explicit user rule for the path wins"
+    );
+}
