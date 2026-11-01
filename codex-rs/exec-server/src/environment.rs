@@ -60,6 +60,9 @@ mod accepted;
 pub use connect_options::RemoteEnvironmentOptions;
 
 pub const CODEX_EXEC_SERVER_URL_ENV_VAR: &str = "CODEX_EXEC_SERVER_URL";
+/// Optional bearer token sent with the legacy `CODEX_EXEC_SERVER_URL`
+/// connection, for exec-servers started with `--ws-auth capability-token`.
+pub const CODEX_EXEC_SERVER_AUTH_TOKEN_ENV_VAR: &str = "CODEX_EXEC_SERVER_AUTH_TOKEN";
 pub const CODEX_EXEC_SERVER_NOISE_REGISTRY_URL_ENV_VAR: &str =
     "CODEX_EXEC_SERVER_NOISE_REGISTRY_URL";
 pub const CODEX_EXEC_SERVER_NOISE_ENVIRONMENT_ID_ENV_VAR: &str =
@@ -179,7 +182,8 @@ impl EnvironmentManager {
         exec_server_url: Option<String>,
         local_runtime_paths: Option<ExecServerRuntimeOptions>,
     ) -> Self {
-        let provider = DefaultEnvironmentProvider::new(exec_server_url);
+        let provider = DefaultEnvironmentProvider::new(exec_server_url)
+            .with_auth_bearer_token(test_auth_bearer_token());
         match Self::from_snapshot(
             provider.snapshot_inner(),
             local_runtime_paths,
@@ -273,7 +277,9 @@ impl EnvironmentManager {
         exec_server_url: Option<String>,
         local_runtime_paths: ExecServerRuntimeOptions,
     ) -> Self {
-        let mut snapshot = DefaultEnvironmentProvider::new(exec_server_url).snapshot_inner();
+        let mut snapshot = DefaultEnvironmentProvider::new(exec_server_url)
+            .with_auth_bearer_token(test_auth_bearer_token())
+            .snapshot_inner();
         snapshot.include_local = true;
         match Self::from_snapshot(
             snapshot,
@@ -2028,4 +2034,10 @@ mod tests {
             "sandboxed filesystem operations require configured runtime paths"
         );
     }
+}
+
+/// Test environments honour the same bearer-token variable as `from_env`, so
+/// remote test harnesses can run an authenticated exec-server.
+fn test_auth_bearer_token() -> Option<String> {
+    std::env::var(CODEX_EXEC_SERVER_AUTH_TOKEN_ENV_VAR).ok()
 }

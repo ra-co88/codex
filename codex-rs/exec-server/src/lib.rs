@@ -114,6 +114,7 @@ pub use codex_protocol::shell_environment::CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN_EN
 pub use environment::CODEX_EXEC_SERVER_NOISE_CHATGPT_ACCOUNT_ID_ENV_VAR;
 pub use environment::CODEX_EXEC_SERVER_NOISE_ENVIRONMENT_ID_ENV_VAR;
 pub use environment::CODEX_EXEC_SERVER_NOISE_REGISTRY_URL_ENV_VAR;
+pub use environment::CODEX_EXEC_SERVER_AUTH_TOKEN_ENV_VAR;
 pub use environment::CODEX_EXEC_SERVER_URL_ENV_VAR;
 pub use environment::ConnectionAttemptOutcome;
 pub use environment::Environment;

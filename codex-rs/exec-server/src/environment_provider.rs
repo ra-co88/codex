@@ -6,6 +6,7 @@ use codex_config::ScopedSkillsConfig;
 use crate::ExecServerError;
 use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT;
 use crate::client_api::ExecServerTransportParams;
+use crate::environment::CODEX_EXEC_SERVER_AUTH_TOKEN_ENV_VAR;
 use crate::environment::CODEX_EXEC_SERVER_URL_ENV_VAR;
 use crate::environment::LOCAL_ENVIRONMENT_ID;
 use crate::environment::REMOTE_ENVIRONMENT_ID;
@@ -61,17 +62,32 @@ pub enum EnvironmentDefault {
 #[derive(Clone, Debug)]
 pub struct DefaultEnvironmentProvider {
     exec_server_url: Option<String>,
+    auth_bearer_token: Option<String>,
 }
 
 impl DefaultEnvironmentProvider {
     /// Builds a provider from an already-read raw `CODEX_EXEC_SERVER_URL` value.
     pub fn new(exec_server_url: Option<String>) -> Self {
-        Self { exec_server_url }
+        Self {
+            exec_server_url,
+            auth_bearer_token: None,
+        }
     }
 
-    /// Builds a provider by reading `CODEX_EXEC_SERVER_URL`.
+    /// Sends `Authorization: Bearer <token>` when connecting to the remote
+    /// exec-server. Empty or whitespace-only tokens are ignored.
+    pub fn with_auth_bearer_token(mut self, auth_bearer_token: Option<String>) -> Self {
+        self.auth_bearer_token = auth_bearer_token
+            .map(|token| token.trim().to_string())
+            .filter(|token| !token.is_empty());
+        self
+    }
+
+    /// Builds a provider by reading `CODEX_EXEC_SERVER_URL` and the optional
+    /// `CODEX_EXEC_SERVER_AUTH_TOKEN`.
     pub fn from_env() -> Self {
         Self::new(std::env::var(CODEX_EXEC_SERVER_URL_ENV_VAR).ok())
+            .with_auth_bearer_token(std::env::var(CODEX_EXEC_SERVER_AUTH_TOKEN_ENV_VAR).ok())
     }
 
     pub(crate) fn snapshot_inner(&self) -> EnvironmentProviderSnapshot {
@@ -81,10 +97,7 @@ impl DefaultEnvironmentProvider {
         if let Some(exec_server_url) = exec_server_url {
             environments.push(EnvironmentProviderEntry {
                 id: REMOTE_ENVIRONMENT_ID.to_string(),
-                transport: ExecServerTransportParams::websocket_url(
-                    exec_server_url,
-                    DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT,
-                ),
+                transport: websocket_transport(exec_server_url, self.auth_bearer_token.as_deref()),
                 skills: ScopedSkillsConfig::default(),
             });
         }
@@ -107,6 +120,32 @@ impl DefaultEnvironmentProvider {
             include_local,
         }
     }
+}
+
+fn websocket_transport(
+    exec_server_url: String,
+    auth_bearer_token: Option<&str>,
+) -> ExecServerTransportParams {
+    let mut transport = ExecServerTransportParams::websocket_url(
+        exec_server_url,
+        DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT,
+    );
+    let Some(token) = auth_bearer_token else {
+        return transport;
+    };
+    let ExecServerTransportParams::WebSocketUrl { http_headers, .. } = &mut transport else {
+        return transport;
+    };
+    match http::HeaderValue::from_str(&format!("Bearer {token}")) {
+        Ok(mut value) => {
+            value.set_sensitive(true);
+            http_headers.insert(http::header::AUTHORIZATION, value);
+        }
+        Err(_) => tracing::warn!(
+            "ignoring {CODEX_EXEC_SERVER_AUTH_TOKEN_ENV_VAR}: not a valid HTTP header value"
+        ),
+    }
+    transport
 }
 
 impl EnvironmentProvider for DefaultEnvironmentProvider {
@@ -230,5 +269,41 @@ mod tests {
             normalize_exec_server_url(Some(" ws://127.0.0.1:8765 ".to_string())),
             (Some("ws://127.0.0.1:8765".to_string()), false)
         );
+    }
+
+    #[test]
+    fn default_provider_sends_bearer_token_for_websocket_url() {
+        let snapshot = DefaultEnvironmentProvider::new(Some("ws://127.0.0.1:8765".to_string()))
+            .with_auth_bearer_token(Some(" secret-token \n".to_string()))
+            .snapshot_inner();
+        let transport = snapshot
+            .environments
+            .into_iter()
+            .find(|entry| entry.id == REMOTE_ENVIRONMENT_ID)
+            .expect("remote environment")
+            .transport;
+        let ExecServerTransportParams::WebSocketUrl { http_headers, .. } = transport else {
+            panic!("expected websocket transport");
+        };
+        let authorization = &http_headers[http::header::AUTHORIZATION];
+        assert_eq!(authorization, "Bearer secret-token");
+        assert!(authorization.is_sensitive());
+    }
+
+    #[test]
+    fn default_provider_ignores_blank_bearer_token() {
+        let snapshot = DefaultEnvironmentProvider::new(Some("ws://127.0.0.1:8765".to_string()))
+            .with_auth_bearer_token(Some("   ".to_string()))
+            .snapshot_inner();
+        let transport = snapshot
+            .environments
+            .into_iter()
+            .find(|entry| entry.id == REMOTE_ENVIRONMENT_ID)
+            .expect("remote environment")
+            .transport;
+        let ExecServerTransportParams::WebSocketUrl { http_headers, .. } = transport else {
+            panic!("expected websocket transport");
+        };
+        assert!(http_headers.get(http::header::AUTHORIZATION).is_none());
     }
 }

@@ -68,12 +68,26 @@ setup_remote_env() {
     remote_codex_path="/tmp/codex-remote-env/codex"
     remote_exec_server_port="31987"
     remote_exec_server_stdout_path="/tmp/codex-remote-env/exec-server.stdout"
+    remote_exec_server_token_path="/tmp/codex-remote-env/ws-token"
     docker exec "${container_name}" sh -lc "mkdir -p /tmp/codex-remote-env"
     docker cp "${codex_binary_path}" "${container_name}:${remote_codex_path}"
     docker exec "${container_name}" chmod +x "${remote_codex_path}"
+    # The exec-server listens on the container's network address, so it must
+    # require auth (non-loopback listeners without auth are refused). Use a
+    # fresh capability token per container and hand it to the test client via
+    # CODEX_EXEC_SERVER_AUTH_TOKEN.
+    local remote_exec_server_token
+    remote_exec_server_token="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+    if [[ ${#remote_exec_server_token} -ne 64 ]]; then
+      echo "failed to generate remote exec-server token" >&2
+      docker rm -f "${container_name}" >/dev/null 2>&1 || true
+      return 1
+    fi
+    printf '%s\n' "${remote_exec_server_token}" | docker exec -i "${container_name}" sh -c \
+      "umask 077 && cat > ${remote_exec_server_token_path}"
     remote_exec_server_pid="$(
       docker exec "${container_name}" sh -lc \
-        "rm -f ${remote_exec_server_stdout_path}; nohup ${remote_codex_path} exec-server --listen ws://0.0.0.0:${remote_exec_server_port} > ${remote_exec_server_stdout_path} 2>&1 & echo \$!"
+        "rm -f ${remote_exec_server_stdout_path}; nohup ${remote_codex_path} exec-server --listen ws://0.0.0.0:${remote_exec_server_port} --ws-auth capability-token --ws-token-file ${remote_exec_server_token_path} > ${remote_exec_server_stdout_path} 2>&1 & echo \$!"
     )"
     wait_for_remote_exec_server_port "${container_name}" "${remote_exec_server_port}" "${remote_exec_server_stdout_path}"
     container_ip="$(
@@ -86,6 +100,7 @@ setup_remote_env() {
     fi
     export CODEX_TEST_REMOTE_EXEC_SERVER_PID="${remote_exec_server_pid}"
     export CODEX_TEST_REMOTE_EXEC_SERVER_URL="ws://${container_ip}:${remote_exec_server_port}"
+    export CODEX_EXEC_SERVER_AUTH_TOKEN="${remote_exec_server_token}"
   fi
 
   export CODEX_TEST_REMOTE_ENV="${container_name}"
@@ -119,6 +134,7 @@ codex_remote_env_cleanup() {
   unset CODEX_TEST_REMOTE_ENV_CONTAINER_NAME
   unset CODEX_TEST_REMOTE_EXEC_SERVER_PID
   unset CODEX_TEST_REMOTE_EXEC_SERVER_URL
+  unset CODEX_EXEC_SERVER_AUTH_TOKEN
   unset CODEX_TEST_ENVIRONMENT
 }
 
