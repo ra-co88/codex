@@ -1217,6 +1217,12 @@ impl Environment {
     }
 }
 
+/// Test environments honour the same bearer-token variable as `from_env`, so
+/// remote test harnesses can run an authenticated exec-server.
+fn test_auth_bearer_token() -> Option<String> {
+    std::env::var(CODEX_EXEC_SERVER_AUTH_TOKEN_ENV_VAR).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -2034,10 +2040,4 @@ mod tests {
             "sandboxed filesystem operations require configured runtime paths"
         );
     }
-}
-
-/// Test environments honour the same bearer-token variable as `from_env`, so
-/// remote test harnesses can run an authenticated exec-server.
-fn test_auth_bearer_token() -> Option<String> {
-    std::env::var(CODEX_EXEC_SERVER_AUTH_TOKEN_ENV_VAR).ok()
 }
