@@ -1,0 +1,104 @@
+# Fork-only (ra-co88): focused Linux CI for the audit remediation branches.
+# Upstream rust-ci-full expects OpenAI's runner images; this runs on standard
+# GitHub-hosted Ubuntu instead. Do not include in upstream PRs.
+name: fork-audit-ci
+
+on:
+  push:
+    branches:
+      - "audit/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-audit-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_MIN_STACK: "8388608"
+  CRATES: -p codex-ansi-escape -p codex-protocol -p codex-sandboxing -p codex-exec-server -p codex-core
+
+jobs:
+  check:
+    name: fmt + clippy + unit tests (touched crates)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: System deps
+        run: |
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential pkg-config libcap-dev libasound2-dev bubblewrap libglib2.0-dev libdbus-1-dev libssl-dev
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+          components: clippy, rustfmt
+      - name: Configure rusty_v8 artifacts
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-gnu
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy $CRATES --tests -- -D warnings
+      - name: unit tests
+        run: cargo nextest run $CRATES --lib --no-fail-fast
+
+  remote_env:
+    name: core suite against authenticated remote exec-server
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: System deps
+        run: |
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential pkg-config libcap-dev libasound2-dev bubblewrap libglib2.0-dev libdbus-1-dev libssl-dev
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Configure rusty_v8 artifacts
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-gnu
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
+      - name: Build codex CLI and core tests
+        run: |
+          cargo build -p codex-cli --bin codex
+          cargo nextest run -p codex-core --no-run
+      - name: Remote env tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CODEX_TEST_REMOTE_ENV_CONTAINER_NAME="codex-remote-test-env-${{ github.run_id }}"
+          source "${GITHUB_WORKSPACE}/scripts/test-remote-env.sh"
+          if [[ -n "${CODEX_EXEC_SERVER_AUTH_TOKEN:-}" ]]; then
+            echo "::add-mask::${CODEX_EXEC_SERVER_AUTH_TOKEN}"
+          else
+            echo "::error::harness did not export CODEX_EXEC_SERVER_AUTH_TOKEN"; exit 1
+          fi
+          trap codex_remote_env_cleanup EXIT
+          cargo nextest run -p codex-core --no-fail-fast
